@@ -1,13 +1,3 @@
-class CopyFromS3ToRedshift:
-    copy_json_files_sql = """
-        COPY {}
-        FROM '{}'
-        ACCESS_KEY_ID '{}'
-        SECRET_ACCESS_KEY '{}'
-        FORMAT AS JSON 'auto'
-    """
-
-
 class InsertQueries:
     songplays_table_insert = """
     INSERT INTO songplays 

@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# test file
+download_s3.py
+
 # Airflow logs
 logs/
 

@@ -11,7 +11,7 @@ from operators import (
     DropTablesOperator,
 )
 
-from helpers.sql_queries import CreateQueries, CopyFromS3ToRedshift, InsertQueries
+from helpers.sql_queries import CreateQueries, InsertQueries
 
 
 default_args = {
@@ -75,6 +75,7 @@ with DAG(
         sql=CreateQueries.songplays_table_create,
     )
 
+    # Redshift COPY command from S3 data using the 'auto' switch is case sensitive for JSON
     copy_events_from_s3_to_redshift = StageToRedshiftOperator(
         task_id="copy_events_to_staging_table",
         redshift_conn_id="redshift",
@@ -82,7 +83,13 @@ with DAG(
         table="staging_events",
         s3_bucket="udacity-de-files",
         s3_key="raw/logs/",
-        sql=CopyFromS3ToRedshift.copy_json_files_sql,
+        sql="""
+            COPY {}
+            FROM '{}'
+            ACCESS_KEY_ID '{}'
+            SECRET_ACCESS_KEY '{}'
+            FORMAT AS JSON 's3://udacity-de-files/raw/log_json_path.json'
+        """,
     )
 
     copy_songs_from_s3_to_redshift = StageToRedshiftOperator(
@@ -92,7 +99,13 @@ with DAG(
         table="staging_songs",
         s3_bucket="udacity-de-files",
         s3_key="raw/songs/",
-        sql=CopyFromS3ToRedshift.copy_json_files_sql,
+        sql="""
+            COPY {}
+            FROM '{}'
+            ACCESS_KEY_ID '{}'
+            SECRET_ACCESS_KEY '{}'
+            FORMAT AS JSON 'auto'
+        """,
     )
 
     insert_into_time_table = LoadDimensionOperator(
