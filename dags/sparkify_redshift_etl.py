@@ -17,18 +17,20 @@ from helpers.sql_queries import CreateQueries, InsertQueries
 
 default_args = {
     "owner": "udacity",
-    "start_date": datetime.today() - timedelta(days=1),
+    "start_date": datetime.today() - timedelta(days=3),
     "retries": 0,
     "retry_delay": timedelta(minutes=5),
     "email": ["example@example.com"],
     "email_on_failure": False,
     "email_on_retry": False,
     "schedule_interval": "@daily",
+    "depends_on_past": False,  # tasks can execute if the previous failed
 }
 
 with DAG(
     "redshift_dw_pipeline",
     default_args=default_args,
+    catchup=False,  # Dont run tasks on backfills, only the latest task
     description="Load and transform data in Redshift with Airflow",
 ) as dag:
 
@@ -172,6 +174,22 @@ with DAG(
         tolerance=0.01,
     )
 
+    # drop tables after running the whole DAG
+    drop_all_created_tables = DropTablesOperator(
+        task_id="drop_all_created_tables",
+        redshift_conn_id="redshift",
+        tables=[
+            "staging_events",
+            "staging_songs",
+            "songplays",
+            "users",
+            "songs",
+            "artists",
+            "time",
+        ],
+    )
+
+    # end the dag
     end_operator = DummyOperator(task_id="Stop_execution", dag=dag)
 
     # Group the starting dependencies
@@ -247,3 +265,5 @@ with DAG(
         insert_into_songs_table,
         insert_into_songplays_table,
     ] >> end_operator
+
+    end_operator >> drop_all_created_tables
