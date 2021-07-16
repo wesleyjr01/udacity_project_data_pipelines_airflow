@@ -1,6 +1,6 @@
 class InsertQueries:
     songplays_table_insert = """
-    INSERT INTO songplays 
+    INSERT INTO {target_table} 
     (start_time, user_id, level, song_id, artist_id, session_id, location, user_agent)
     (
         WITH temp1 AS (
@@ -20,19 +20,19 @@ class InsertQueries:
             ,se.location
             ,se.user_agent
             
-        FROM staging_events se
+        FROM {source_table} se
         LEFT JOIN temp1 t1 ON t1.staging_events_id = se.staging_events_id 
         WHERE se.page = 'NextSong'
     );
     """
 
     users_table_insert = """
-    INSERT INTO users
+    INSERT INTO {target_table}
     (user_id, first_name, last_name, gender, level)
     (
         WITH temp_users AS (
             SELECT se.*, ROW_NUMBER() OVER (PARTITION BY se.user_id ORDER BY se.ts DESC) as seqnum
-            FROM staging_events se)
+            FROM {source_table} se)
         SELECT DISTINCT 
             tu.user_id,
             tu.first_name,
@@ -48,12 +48,12 @@ class InsertQueries:
     """
 
     songs_table_insert = """
-    INSERT INTO songs
+    INSERT INTO {target_table}
     (song_id, title, artist_id, year, duration)
     (
         WITH temp_songs AS (
             SELECT ss.*, ROW_NUMBER() OVER (PARTITION BY ss.song_id ORDER BY ss.year) as seqnum
-            FROM staging_songs ss)
+            FROM {source_table} ss)
         SELECT DISTINCT 
             ts.song_id,
             ts.title,
@@ -66,12 +66,12 @@ class InsertQueries:
     """
 
     artists_table_insert = """
-    INSERT INTO artists
+    INSERT INTO {target_table}
     (artist_id, name, location, latitude, longitude)
     (
         WITH temp_songs AS (
             SELECT ss.*, ROW_NUMBER() OVER (PARTITION BY ss.artist_id ORDER BY ss.year) as seqnum
-            FROM staging_songs ss)
+            FROM {source_table} ss)
         SELECT DISTINCT 
             ts.artist_id,
             ts.artist_name,
@@ -84,7 +84,7 @@ class InsertQueries:
     """
 
     time_table_insert = """
-        INSERT INTO time
+        INSERT INTO {target_table}
         (start_time, hour, day, week, month, year, weekday)
         (
             SELECT DISTINCT date_add('ms', se.ts, '1970-01-01') as start_time 
@@ -94,7 +94,7 @@ class InsertQueries:
                 ,EXTRACT(MONTH FROM date_add('ms', se.ts, '1970-01-01')) as month
                 ,EXTRACT(YEAR FROM date_add('ms', se.ts, '1970-01-01')) as year
                 ,EXTRACT (WEEKDAY FROM date_add('ms', se.ts, '1970-01-01')) as weekday
-            FROM staging_events se
+            FROM {source_table} se
         )
     """
 

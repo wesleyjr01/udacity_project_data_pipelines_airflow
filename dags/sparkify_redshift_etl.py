@@ -23,7 +23,7 @@ default_args = {
     "email": ["example@example.com"],
     "email_on_failure": False,
     "email_on_retry": False,
-    "schedule_interval": "@daily",
+    "schedule_interval": "@hourly",
     "depends_on_past": False,  # tasks can execute if the previous failed
 }
 
@@ -115,30 +115,40 @@ with DAG(
         task_id="insert_into_time_table",
         redshift_conn_id="redshift",
         sql=InsertQueries.time_table_insert,
+        source_table="staging_events",
+        target_table="time",
     )
 
     insert_into_artists_table = LoadDimensionOperator(
         task_id="insert_into_artists_table",
         redshift_conn_id="redshift",
         sql=InsertQueries.artists_table_insert,
+        source_table="staging_songs",
+        target_table="artists",
     )
 
     insert_into_users_table = LoadDimensionOperator(
         task_id="insert_into_users_table",
         redshift_conn_id="redshift",
         sql=InsertQueries.users_table_insert,
+        source_table="staging_events",
+        target_table="users",
     )
 
     insert_into_songs_table = LoadDimensionOperator(
         task_id="insert_into_songs_table",
         redshift_conn_id="redshift",
         sql=InsertQueries.songs_table_insert,
+        source_table="staging_songs",
+        target_table="songs",
     )
 
     insert_into_songplays_table = LoadFactOperator(
         task_id="insert_into_songplays_table",
         redshift_conn_id="redshift",
         sql=InsertQueries.songplays_table_insert,
+        source_table="staging_events",
+        target_table="songplays",
     )
 
     # Data QualityChecks
@@ -172,21 +182,6 @@ with DAG(
         sql="SELECT COUNT(*) FROM staging_songs",
         pass_value=71,
         tolerance=0.01,
-    )
-
-    # drop tables after running the whole DAG
-    drop_all_created_tables = DropTablesOperator(
-        task_id="drop_all_created_tables",
-        redshift_conn_id="redshift",
-        tables=[
-            "staging_events",
-            "staging_songs",
-            "songplays",
-            "users",
-            "songs",
-            "artists",
-            "time",
-        ],
     )
 
     # end the dag
@@ -265,5 +260,3 @@ with DAG(
         insert_into_songs_table,
         insert_into_songplays_table,
     ] >> end_operator
-
-    end_operator >> drop_all_created_tables
