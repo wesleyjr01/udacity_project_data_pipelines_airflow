@@ -1,5 +1,5 @@
 class InsertQueries:
-    songplays_table_insert = """
+    songplays_table_incremental_load = """
     INSERT INTO {target_table} 
     (start_time, user_id, level, song_id, artist_id, session_id, location, user_agent)
     (
@@ -23,10 +23,11 @@ class InsertQueries:
         FROM {source_table} se
         LEFT JOIN temp1 t1 ON t1.staging_events_id = se.staging_events_id 
         WHERE se.page = 'NextSong'
+        AND date_add('ms', se.ts, '1970-01-01') > (SELECT COALESCE(MAX(start_time), '1800-01-01') FROM {target_table})
     );
     """
 
-    users_table_insert = """
+    users_table_full_load = """
     INSERT INTO {target_table}
     (user_id, first_name, last_name, gender, level)
     (
@@ -47,7 +48,29 @@ class InsertQueries:
     );
     """
 
-    songs_table_insert = """
+    users_table_incremental_load = """
+    INSERT INTO {target_table}
+    (user_id, first_name, last_name, gender, level)
+    (
+        WITH temp_users AS (
+            SELECT se.*, ROW_NUMBER() OVER (PARTITION BY se.user_id ORDER BY se.ts DESC) as seqnum
+            FROM {source_table} se)
+        SELECT DISTINCT 
+            tu.user_id,
+            tu.first_name,
+            tu.last_name,
+            tu.gender,
+            tu.level
+        FROM temp_users tu
+        WHERE 
+            tu.seqnum = 1 
+            AND tu.page = 'NextSong'
+            AND tu.user_id IS NOT NULL
+            AND tu.user_id NOT IN (SELECT user_id FROM {target_table})
+    );
+    """
+
+    songs_table_full_load = """
     INSERT INTO {target_table}
     (song_id, title, artist_id, year, duration)
     (
@@ -65,7 +88,26 @@ class InsertQueries:
     );
     """
 
-    artists_table_insert = """
+    songs_table_incremental_load = """
+    INSERT INTO {target_table}
+    (song_id, title, artist_id, year, duration)
+    (
+        WITH temp_songs AS (
+            SELECT ss.*, ROW_NUMBER() OVER (PARTITION BY ss.song_id ORDER BY ss.year) as seqnum
+            FROM {source_table} ss)
+        SELECT DISTINCT 
+            ts.song_id,
+            ts.title,
+            ts.artist_id,
+            ts.year,
+            ts.duration
+        FROM temp_songs ts
+        WHERE ts.seqnum = 1 
+        AND ts.song_id NOT IN (SELECT song_id FROM {target_table})
+    );
+    """
+
+    artists_table_full_load = """
     INSERT INTO {target_table}
     (artist_id, name, location, latitude, longitude)
     (
@@ -83,7 +125,26 @@ class InsertQueries:
     );
     """
 
-    time_table_insert = """
+    artists_table_incremental_load = """
+    INSERT INTO {target_table}
+    (artist_id, name, location, latitude, longitude)
+    (
+        WITH temp_songs AS (
+            SELECT ss.*, ROW_NUMBER() OVER (PARTITION BY ss.artist_id ORDER BY ss.year) as seqnum
+            FROM {source_table} ss)
+        SELECT DISTINCT 
+            ts.artist_id,
+            ts.artist_name,
+            ts.artist_location,
+            ts.artist_latitude,
+            ts.artist_longitude
+        FROM temp_songs ts
+        WHERE ts.seqnum = 1
+        AND ts.artist_id NOT IN (SELECT artist_id FROM {target_table}) 
+    );
+    """
+
+    time_table_full_load = """
         INSERT INTO {target_table}
         (start_time, hour, day, week, month, year, weekday)
         (
@@ -95,6 +156,22 @@ class InsertQueries:
                 ,EXTRACT(YEAR FROM date_add('ms', se.ts, '1970-01-01')) as year
                 ,EXTRACT (WEEKDAY FROM date_add('ms', se.ts, '1970-01-01')) as weekday
             FROM {source_table} se
+        )
+    """
+
+    time_table_incremental_load = """
+        INSERT INTO {target_table}
+        (start_time, hour, day, week, month, year, weekday)
+        (
+            SELECT DISTINCT date_add('ms', se.ts, '1970-01-01') as start_time 
+                ,EXTRACT(HOUR FROM date_add('ms', se.ts, '1970-01-01')) as hour
+                ,EXTRACT(DAY FROM date_add('ms', se.ts, '1970-01-01')) as day
+                ,EXTRACT(WEEK FROM date_add('ms', se.ts, '1970-01-01')) as week
+                ,EXTRACT(MONTH FROM date_add('ms', se.ts, '1970-01-01')) as month
+                ,EXTRACT(YEAR FROM date_add('ms', se.ts, '1970-01-01')) as year
+                ,EXTRACT (WEEKDAY FROM date_add('ms', se.ts, '1970-01-01')) as weekday
+            FROM {source_table} se
+            AND {target_table}.start_time NOT IN (SELECT date_add('ms', ts, '1970-01-01') FROM {source_table})
         )
     """
 
@@ -205,4 +282,10 @@ class CreateQueries:
             weekday INT,
             PRIMARY KEY(start_time)
         );
+    """
+
+
+class DeleteRowsQueries:
+    delete_table_rows = """
+    DELETE FROM {table_name};
     """

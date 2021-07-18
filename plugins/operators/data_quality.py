@@ -1,28 +1,42 @@
-from airflow.hooks.postgres_hook import PostgresHook
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.exceptions import AirflowException
 
+from typing import List, Dict
 
-class DataQualityOperatorHasRows(BaseOperator):
+
+class DataQualityOperator(BaseOperator):
     ui_color = "#89DA59"
 
     @apply_defaults
-    def __init__(self, redshift_conn_id: str, sql: str, *args, **kwargs):
+    def __init__(self, conn_id: str, dq_checks: List[Dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.redshift_conn_id = redshift_conn_id
-        self.sql = sql
+        self.conn_id = conn_id
+        self.dq_checks = dq_checks
 
     def execute(self, context):
-        self.log.info("Executing SQL check: %s", self.sql)
-        records = self.get_db_hook().get_first(self.sql)
+        db_hook = PostgresHook(postgres_conn_id=self.conn_id)
 
-        self.log.info("Record: %s", records)
-        if not records:
-            raise AirflowException("The query returned None")
-        elif not all(bool(r) for r in records):
-            raise AirflowException(
-                f"Test failed.\nQuery:\n{self.sql}\nResults:\n{records!s}"
-            )
-
-        self.log.info("Success.")
+        for check in self.dq_checks:
+            check_sql = check.get("check_sql")
+            expected_result = check.get("expected_result")
+            self.log.info(f"Check: {check}")
+            if check_sql is None:
+                raise AirflowException(
+                    "'check_sql' key is missing for each dictionary provided on dq_checks."
+                )
+            elif expected_result is None:
+                raise AirflowException(
+                    "'expected_result' key is missing for each dictionary provided on dq_checks."
+                )
+            else:
+                self.log.info(f"Executing SQL check: {check_sql}")
+                records = db_hook.get_first(check_sql)[0]
+                self.log.info(f"Records returned: {records}")
+                if not expected_result == records:
+                    raise AirflowException(
+                        f"Expected Result is {expected_result}, but check_sql returned {records}"
+                    )
+                else:
+                    self.log.info(f"Check passed.")

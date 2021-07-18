@@ -12,6 +12,7 @@ class LoadFactOperator(BaseOperator):
         redshift_conn_id: str,
         source_table: str,
         target_table: str,
+        load_mode: str,
         sql: str,
         *args,
         **kwargs,
@@ -20,15 +21,21 @@ class LoadFactOperator(BaseOperator):
         self.redshift_conn_id = redshift_conn_id
         self.source_table = source_table
         self.target_table = target_table
+        self.load_mode = load_mode
         self.sql = sql
 
     def execute(self, context):
         redshift_hook = PostgresHook(postgres_conn_id=self.redshift_conn_id)
 
-        self.log.info(f"Inserting data into fact table {self.target_table}")
-        redshift_hook.run(
-            self.sql.format(
-                source_table=self.source_table,
-                target_table=self.target_table,
+        if self.load_mode == "append":
+            self.log.info(f"Incremental load into Fact table {self.target_table}.")
+            redshift_hook.run(
+                self.sql.format(
+                    source_table=self.source_table,
+                    target_table=self.target_table,
+                )
             )
-        )
+        else:
+            raise ValueError(
+                "Invalid load_mode. For Fact tables, only load_mode='append' is allowed"
+            )

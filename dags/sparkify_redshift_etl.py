@@ -9,7 +9,7 @@ from operators import (
     StageToRedshiftOperator,
     LoadFactOperator,
     LoadDimensionOperator,
-    DropTablesOperator,
+    DataQualityOperator,
 )
 
 from helpers.sql_queries import CreateQueries, InsertQueries
@@ -114,7 +114,8 @@ with DAG(
     insert_into_time_table = LoadDimensionOperator(
         task_id="insert_into_time_table",
         redshift_conn_id="redshift",
-        sql=InsertQueries.time_table_insert,
+        load_mode="delete-reload",
+        sql=InsertQueries.time_table_full_load,
         source_table="staging_events",
         target_table="time",
     )
@@ -122,7 +123,8 @@ with DAG(
     insert_into_artists_table = LoadDimensionOperator(
         task_id="insert_into_artists_table",
         redshift_conn_id="redshift",
-        sql=InsertQueries.artists_table_insert,
+        load_mode="append",
+        sql=InsertQueries.artists_table_incremental_load,
         source_table="staging_songs",
         target_table="artists",
     )
@@ -130,7 +132,8 @@ with DAG(
     insert_into_users_table = LoadDimensionOperator(
         task_id="insert_into_users_table",
         redshift_conn_id="redshift",
-        sql=InsertQueries.users_table_insert,
+        load_mode="delete-reload",
+        sql=InsertQueries.users_table_full_load,
         source_table="staging_events",
         target_table="users",
     )
@@ -138,7 +141,8 @@ with DAG(
     insert_into_songs_table = LoadDimensionOperator(
         task_id="insert_into_songs_table",
         redshift_conn_id="redshift",
-        sql=InsertQueries.songs_table_insert,
+        load_mode="delete-reload",
+        sql=InsertQueries.songs_table_full_load,
         source_table="staging_songs",
         target_table="songs",
     )
@@ -146,42 +150,48 @@ with DAG(
     insert_into_songplays_table = LoadFactOperator(
         task_id="insert_into_songplays_table",
         redshift_conn_id="redshift",
-        sql=InsertQueries.songplays_table_insert,
+        load_mode="append",
+        sql=InsertQueries.songplays_table_incremental_load,
         source_table="staging_events",
         target_table="songplays",
     )
 
     # Data QualityChecks
-    # Staging events has rows?
-    staging_events_has_rows = SQLCheckOperator(
-        task_id="staging_events_has_rows",
+    dimension_tables_quality_check = DataQualityOperator(
+        task_id="dimension_quality_checks",
         conn_id="redshift",
-        sql="SELECT COUNT(*) FROM staging_events",
+        dq_checks=[
+            {
+                "check_sql": "SELECT COUNT(*) FROM songs WHERE artist_id IS NULL",
+                "expected_result": 0,
+            },
+            {
+                "check_sql": "SELECT COUNT(*) FROM songs WHERE song_id IS NULL",
+                "expected_result": 0,
+            },
+            {
+                "check_sql": "SELECT COUNT(*) FROM users WHERE user_id IS NULL",
+                "expected_result": 0,
+            },
+            {
+                "check_sql": "SELECT COUNT(*) FROM artists WHERE artist_id IS NULL",
+                "expected_result": 0,
+            },
+        ],
     )
-
-    # Staging songs has rows?
-    staging_songs_has_rows = SQLCheckOperator(
-        task_id="staging_songs_has_rows",
+    fact_tables_quality_check = DataQualityOperator(
+        task_id="fact_quality_checks",
         conn_id="redshift",
-        sql="SELECT COUNT(*) FROM staging_songs",
-    )
-
-    # Staging events has the right number of rows?
-    staging_events_has_correct_number_rows = SQLValueCheckOperator(
-        task_id="staging_events_has_correct_number_rows",
-        conn_id="redshift",
-        sql="SELECT COUNT(*) FROM staging_events",
-        pass_value=8056,
-        tolerance=0.01,
-    )
-
-    # Staging songs has the right number of rows?
-    staging_songs_has_correct_number_rows = SQLValueCheckOperator(
-        task_id="staging_songs_has_correct_number_rows",
-        conn_id="redshift",
-        sql="SELECT COUNT(*) FROM staging_songs",
-        pass_value=71,
-        tolerance=0.01,
+        dq_checks=[
+            {
+                "check_sql": "SELECT COUNT(*) FROM songplays WHERE songplay_id IS NULL",
+                "expected_result": 0,
+            },
+            {
+                "check_sql": "SELECT COUNT(*) FROM songplays WHERE user_id IS NULL",
+                "expected_result": 0,
+            },
+        ],
     )
 
     # end the dag
@@ -228,35 +238,17 @@ with DAG(
     insert_into_songs_table >> insert_into_songplays_table
     insert_into_artists_table >> insert_into_songplays_table
 
-    # data quality checks staging_events has rows
-    copy_events_from_s3_to_redshift >> staging_events_has_rows
-    staging_events_has_rows >> insert_into_time_table
-    staging_events_has_rows >> insert_into_users_table
-    staging_events_has_rows >> insert_into_songplays_table
+    # data quality on dimension tables
+    insert_into_time_table >> dimension_tables_quality_check
+    insert_into_users_table >> dimension_tables_quality_check
+    insert_into_songs_table >> dimension_tables_quality_check
+    insert_into_artists_table >> dimension_tables_quality_check
 
-    # data quality checks staging_event has right number of rows
-    copy_events_from_s3_to_redshift >> staging_events_has_correct_number_rows
-    staging_events_has_correct_number_rows >> insert_into_time_table
-    staging_events_has_correct_number_rows >> insert_into_users_table
-    staging_events_has_correct_number_rows >> insert_into_songplays_table
-
-    # data quality check staging_songs has rows
-    copy_songs_from_s3_to_redshift >> staging_songs_has_rows
-    staging_songs_has_rows >> insert_into_songs_table
-    staging_songs_has_rows >> insert_into_artists_table
-
-    # data quality check staging_songs has right number of rows
-    copy_songs_from_s3_to_redshift >> staging_songs_has_correct_number_rows
-    staging_songs_has_correct_number_rows >> insert_into_songs_table
-    staging_songs_has_correct_number_rows >> insert_into_artists_table
+    # data quality on fact tables
+    insert_into_songplays_table >> fact_tables_quality_check
 
     # end dag
     [
-        copy_events_from_s3_to_redshift,
-        copy_songs_from_s3_to_redshift,
-        insert_into_time_table,
-        insert_into_artists_table,
-        insert_into_users_table,
-        insert_into_songs_table,
-        insert_into_songplays_table,
+        fact_tables_quality_check,
+        dimension_tables_quality_check,
     ] >> end_operator
